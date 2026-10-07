@@ -1,0 +1,134 @@
+# Count Daraa — full stack.
+#
+#   db         PostgreSQL, persistent volume, loopback publish for tooling
+#   backend    NestJS API, private network only
+#   web        Nginx serving the built SPA and proxying /api to the backend
+#   migrations one-shot Prisma deploy, under the "tools" profile
+#
+# Deploy is three commands, in order:
+#
+#   docker compose build
+#   docker compose --profile tools run --rm migrations
+#   docker compose up -d
+#
+# Only `web` is published, and only on loopback: the host proxy in front of it
+# owns HTTPS and the public origin. Nothing here listens on a public interface.
+#
+# Migrations stay a separate, opt-in service on purpose. Starting the
+# application never alters the schema.
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: count_daraa
+      POSTGRES_DB: count_daraa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the root .env}
+    # Loopback only: for psql, pg_dump and the backup script, never remote.
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U count_daraa -d count_daraa"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  backend:
+    image: count-daraa-backend:${COUNT_DARAA_IMAGE_TAG:-local}
+    build:
+      context: ./backend
+      target: runtime
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://count_daraa:${POSTGRES_PASSWORD}@db:5432/count_daraa
+      # The public HTTPS origin the browser uses. The backend rejects any
+      # unsafe request whose Origin header does not match it exactly.
+      APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to your public https origin}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-count_daraa_session}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      MAX_IMPORT_FILE_MB: ${MAX_IMPORT_FILE_MB:-10}
+      MAX_IMPORT_ROWS: ${MAX_IMPORT_ROWS:-10000}
+    # No ports: reachable only by `web` over the private network.
+    expose:
+      - "3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: ["ALL"]
+
+  web:
+    image: count-daraa-web:${COUNT_DARAA_IMAGE_TAG:-local}
+    build:
+      context: ./frontend
+      target: runtime
+      args:
+        # Must stay same-origin: this container serves the app and the API
+        # under one origin, so the relative prefix is the correct value.
+        VITE_API_URL: ${VITE_API_URL:-/api}
+    # Loopback only. The host proxy terminates TLS and forwards to this port.
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: ["ALL"]
+    # Nginx needs these two back to bind port 80 and drop to its worker user.
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    tmpfs:
+      - /var/cache/nginx:size=16m
+      - /var/run:size=1m
+
+  migrations:
+    profiles: ["tools"]
+    image: count-daraa-tools:${COUNT_DARAA_IMAGE_TAG:-local}
+    build:
+      context: ./backend
+      target: build
+    environment:
+      DATABASE_URL: postgresql://count_daraa:${POSTGRES_PASSWORD}@db:5432/count_daraa
+    command: ["npm", "run", "db:migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:

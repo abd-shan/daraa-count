@@ -1,0 +1,662 @@
+/* ---------------------------------------------------------------------------
+   Application shell and page layouts. Colours and spacing come from the
+   tokens declared in index.css.
+--------------------------------------------------------------------------- */
+
+/* Header ----------------------------------------------------------------- */
+.site-header {
+  background: var(--green);
+  color: #fff;
+  border-block-end: 3px solid var(--red);
+}
+.header-content {
+  max-width: var(--content);
+  margin: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1rem var(--gutter);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  color: #fff;
+  text-decoration: none;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.brand small {
+  display: block;
+  color: #d9e8e2;
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+/* Reserved slot for an approved official emblem (--brand-logo token). */
+.brand-logo {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border: 1px solid #ffffff4d;
+  border-radius: var(--radius);
+  background: #ffffff14 var(--brand-logo) center/contain no-repeat;
+} 
+.header-account {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  font-size: 0.92rem;
+  text-align: end;
+}
+.header-account small {
+  display: block;
+  color: #d4e4dd;
+}
+.header-logout {
+  color: #fff;
+  border-color: #7fa699;
+  background: transparent;
+}
+.header-logout:hover:not(:disabled) {
+  background: #ffffff1f;
+  border-color: #fff;
+}
+
+/* Navigation ------------------------------------------------------------- */
+/* The same list renders twice: a sidebar from the tablet width up, and a
+   bottom bar on phones. Exactly one is visible at any size. */
+.sidebar {
+  display: none;
+}
+.sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 1rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  position: sticky;
+  inset-block-start: 0;
+}
+.sidebar a,
+.bottom-bar a {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  color: var(--muted);
+  font-weight: 600;
+  border-radius: var(--radius);
+}
+.sidebar a {
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.97rem;
+  line-height: 1.4;
+}
+.sidebar a:hover {
+  background: var(--green-tint);
+  color: var(--green-darker);
+}
+.sidebar a.active {
+  background: var(--green-tint);
+  color: var(--green-darker);
+  box-shadow: inset 3px 0 0 var(--green);
+}
+.sidebar a.active svg {
+  color: var(--green);
+}
+
+.bottom-bar {
+  position: fixed;
+  inset-inline: 0;
+  inset-block-end: 0;
+  z-index: 15;
+  background: var(--surface);
+  border-block-start: 1px solid var(--border);
+  /* Clears the home indicator on phones that report a safe area. */
+  padding-block-end: env(safe-area-inset-bottom, 0);
+  box-shadow: 0 -2px 12px #14201c14;
+}
+.bottom-bar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0.3rem 0.25rem;
+  display: flex;
+}
+.bottom-bar li {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.bottom-bar a {
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem 0.2rem;
+  /* A comfortable thumb target even on the narrowest phone. */
+  min-height: 52px;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-align: center;
+}
+.bottom-bar a span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.bottom-bar a.active {
+  color: var(--green-darker);
+  background: var(--green-tint);
+}
+
+@media (min-width: 721px) {
+  .sidebar {
+    display: block;
+    flex: 0 0 15rem;
+    background: var(--surface);
+    border-inline-end: 1px solid var(--border);
+  }
+  .bottom-bar {
+    display: none;
+  }
+}
+
+/* Main region and footer ------------------------------------------------- */
+/* The shell is a column: header, then body, with the sidebar and the content
+   side by side inside the body. The bottom bar is fixed outside the flow. */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+.app-body {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+}
+.container {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--content);
+  padding: 1.75rem var(--gutter) 2rem;
+  margin-inline: auto;
+  /* Room for the fixed bottom bar, plus any device safe area. */
+  padding-block-end: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+}
+.site-footer {
+  margin-block-start: auto;
+  padding-block-start: 1.5rem;
+  border-block-start: 1px solid var(--border);
+  font-size: 0.82rem;
+  color: var(--muted);
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+@media (min-width: 721px) {
+  .container {
+    /* The bottom bar is gone at this width, so the padding goes with it. */
+    padding-block-end: 2.5rem;
+  }
+}
+
+/* Page headings and panels ----------------------------------------------- */
+
+.page-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 1.5rem;
+  margin-block-end: 1.5rem;
+  flex-wrap: wrap;
+}
+.page-heading p {
+  margin: 0;
+  color: var(--muted);
+}
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-block-end: 1.5rem;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.panel-body {
+  padding: 1.5rem;
+}
+.panel-head {
+  padding: 1.25rem 1.5rem;
+  border-block-end: 1px solid var(--border);
+}
+.panel-head h2,
+.panel-head p {
+  margin: 0;
+}
+.panel-head p {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  border-block-start: 1px solid var(--border);
+  margin-block-start: 1.25rem;
+  padding-block-start: 1.25rem;
+}
+.section-intro {
+  margin-block: 0 1.5rem;
+  color: var(--muted);
+}
+
+/* Category cards --------------------------------------------------------- */
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 1.25rem;
+  margin-block-end: 1.75rem;
+}
+.category-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.75rem;
+  text-decoration: none;
+  min-height: 230px;
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.category-card::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  height: 5px;
+  background: var(--green);
+}
+.category-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-md);
+}
+.category-card h2 {
+  font-size: 1.3rem;
+  color: var(--green-darker);
+  margin-block-end: 1rem;
+}
+.category-card-count {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  color: var(--muted);
+  margin: 0;
+}
+.category-card-count strong {
+  font-size: 2.4rem;
+  line-height: 1.1;
+  color: var(--primary);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.card-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-block-start: auto;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid var(--border);
+  color: var(--primary);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* Administrator summary -------------------------------------------------- */
+.stat-strip {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-inline-start: 5px solid var(--green);
+  padding: 1.1rem 1.4rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  margin-block-end: 1.5rem;
+}
+.stat-strip dl {
+  display: flex;
+  gap: 2.5rem;
+  flex-wrap: wrap;
+  margin: 0;
+}
+.stat-strip dt {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.stat-strip dd {
+  margin: 0;
+  font-size: 1.7rem;
+  font-weight: 700;
+  color: var(--green-darker);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+.stat-strip > a {
+  margin-inline-start: auto;
+}
+.shortcuts {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* Filter toolbar --------------------------------------------------------- */
+.filters {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.1rem 1.25rem;
+  margin-block-end: 1.25rem;
+  align-items: start;
+  box-shadow: var(--shadow-sm);
+}
+.filters .field {
+  flex: 1 1 180px;
+  margin: 0;
+}
+.filters .field:has(input[type="search"]) {
+  flex: 2 1 260px;
+}
+
+/* Records table ---------------------------------------------------------- */
+.table-caption {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 1.25rem;
+  border-block-end: 1px solid var(--border);
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.row-actions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.row-sub {
+  display: block;
+  font-weight: 400;
+}
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1.25rem;
+  border-block-start: 1px solid var(--border);
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 0.9rem;
+  flex-wrap: wrap;
+}
+
+/* Municipality accounts -------------------------------------------------- */
+.account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 15rem;
+}
+.account {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.account-name {
+  font-weight: 600;
+}
+.account .row-actions {
+  flex-basis: 100%;
+}
+.stack-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 11rem;
+}
+
+/* Import preview --------------------------------------------------------- */
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 1rem;
+  margin: 0 0 1.5rem;
+}
+.summary-grid div {
+  padding: 0.9rem 1.1rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.summary-grid dt {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.summary-grid dd {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--green-darker);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+.summary-grid .is-problem dd {
+  color: var(--error);
+}
+.import-steps {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  list-style: none;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  counter-reset: step;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.import-steps li {
+  counter-increment: step;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.import-steps li::before {
+  content: counter(step);
+  width: 1.6rem;
+  height: 1.6rem;
+  display: grid;
+  place-items: center;
+  background: var(--green-tint);
+  color: var(--green-darker);
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+.import-steps li:not(:last-child)::after {
+  content: "←";
+  color: var(--border-strong);
+  margin-inline-start: 0.25rem;
+}
+
+/* Sign-in page ----------------------------------------------------------- */
+/* Two columns while both fit, one column below that, with no breakpoint to
+   keep in sync. */
+.login-layout {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  width: 100%;
+  max-width: 1100px;
+  padding: 3rem var(--gutter);
+  margin: auto;
+}
+.login-intro .brand-logo {
+  border-color: var(--border-strong);
+  background-color: var(--surface);
+  width: 56px;
+  height: 56px;
+  /*margin-block-end: 1.25rem;*/
+}
+.login-intro p {
+  color: var(--muted);
+  font-size: 1.05rem;
+  max-width: 28rem;
+}
+.login-intro h1 {
+  font-size: 2.6rem;
+  color: var(--green-darker);
+  margin-block: 0 0.75rem;
+}
+/*.login-intro h1::after {*/
+/*  content: "";*/
+/*  display: block;*/
+/*  width: 72px;*/
+/*  height: 5px;*/
+/*  background: var(--green);*/
+/*  margin-block-start: 1rem;*/
+/*}*/
+.login-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 2.25rem;
+  box-shadow: var(--shadow-md);
+  max-width: 600px;
+}
+.login-panel h2 {
+  font-size: 1.4rem;
+  margin-block-end: 0.3rem;
+}
+.login-panel form .primary {
+  margin-block-start: 0.5rem;
+}
+.login-help {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-block: 1.5rem 0;
+  padding-block-start: 1.25rem;
+  border-block-start: 1px solid var(--border);
+}
+
+@media (max-width: 900px) {
+  :root {
+    --gutter: 1.25rem;
+  }
+  .category-grid {
+    gap: 0.9rem;
+  }
+  .category-card {
+    padding: 1.4rem;
+  }
+  .login-layout {
+    gap: 2rem;
+    padding: 2rem var(--gutter);
+  }
+  .login-panel {
+    padding: 1.5rem;
+  }
+  .stat-strip dl {
+    gap: 1.5rem;
+  }
+}
+@media (max-width: 640px) {
+  /* category-grid and summary-grid reflow on their own via auto-fit. */
+  .category-card {
+    min-height: 0;
+    padding: 1.25rem;
+  }
+  .category-card h2 {
+    font-size: 1.15rem;
+    margin-block-end: 0.5rem;
+  }
+  .category-card-count strong {
+    font-size: 2rem;
+  }
+  .card-action {
+    margin-block-start: 1rem;
+  }
+  .header-content {
+    align-items: start;
+    gap: 0.8rem;
+  }
+  .brand {
+    font-size: 0.95rem;
+  }
+  .brand-logo {
+    width: 38px;
+    height: 38px;
+  }
+  .header-account {
+    flex-direction: column;
+    align-items: end;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+  }
+  .header-logout {
+    min-height: 36px;
+    font-size: 0.8rem;
+    padding: 0.3rem 0.65rem;
+  }
+  .page-heading .actions {
+    width: 100%;
+  }
+  .page-heading .actions button {
+    flex: 1 1 auto;
+  }
+  .stat-strip > a {
+    margin-inline-start: 0;
+  }
+  .login-layout {
+    gap: 1.5rem;
+    align-content: center;
+  }
+  .login-intro h1 {
+    font-size: 1.9rem;
+  }
+  .login-intro h1::after {
+    margin-block-start: 0.75rem;
+  }
+  .panel-body,
+  .panel-head {
+    padding: 1.1rem;
+  }
+  .stack-actions,
+  .account-list {
+    min-width: 0;
+  }
+}

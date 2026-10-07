@@ -1,0 +1,18 @@
+# Only build inputs may leave the host. Environment files, local builds,
+# node_modules and test output are excluded by default.
+**
+!Dockerfile
+!app.conf
+!package.json
+!package-lock.json
+!index.html
+!vite.config.ts
+!tsconfig.json
+!tsconfig.app.json
+!tsconfig.node.json
+!src/
+!src/**
+**/*.test.ts
+**/*.test.tsx
+**/.env*
+**/*.xlsx

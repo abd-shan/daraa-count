@@ -1,0 +1,135 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  SUPER_ADMIN
+  MUNICIPALITY
+}
+
+enum CensusCategory {
+  MARTYR
+  WAR_INJURED
+  EXTREME_POVERTY
+}
+
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  WIDOWED
+  DIVORCED
+}
+
+model Municipality {
+  id        String         @id @default(uuid()) @db.Uuid
+  name      String         @unique @db.VarChar(150)
+  areaName  String         @db.VarChar(150)
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  users     User[]
+  records   CensusRecord[]
+  imports   ImportBatch[]
+  auditLogs AuditLog[]
+}
+
+model User {
+  id             String         @id @default(uuid()) @db.Uuid
+  municipalityId String?        @db.Uuid
+  municipality   Municipality?  @relation(fields: [municipalityId], references: [id], onDelete: Restrict)
+  username       String         @unique @db.VarChar(80)
+  passwordHash   String
+  role           Role
+  isActive       Boolean        @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  sessions       Session[]
+  createdRecords CensusRecord[] @relation("CreatedBy")
+  updatedRecords CensusRecord[] @relation("UpdatedBy")
+  imports        ImportBatch[]
+  auditLogs      AuditLog[]
+
+  @@index([municipalityId])
+}
+
+model Session {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique @db.VarChar(64)
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime  @default(now())
+  revokedAt  DateTime?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model CensusRecord {
+  id                 String         @id @default(uuid()) @db.Uuid
+  municipalityId     String         @db.Uuid
+  municipality       Municipality   @relation(fields: [municipalityId], references: [id], onDelete: Restrict)
+  category           CensusCategory
+  personName         String         @db.VarChar(200)
+  maritalStatus      MaritalStatus?
+  spouseName         String?        @db.VarChar(200)
+  nationalId         String?        @db.VarChar(50)
+  familyBookNumber   String?        @db.VarChar(50)
+  familyMembersCount Int?
+  phone              String?        @db.VarChar(50)
+  notes              String?        @db.VarChar(2000)
+  createdById        String         @db.Uuid
+  createdBy          User           @relation("CreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedById        String?        @db.Uuid
+  updatedBy          User?          @relation("UpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  deletedAt          DateTime?
+
+  @@index([municipalityId, category, deletedAt])
+  @@index([nationalId])
+  @@index([familyBookNumber])
+  @@index([phone])
+  @@index([deletedAt])
+}
+
+model ImportBatch {
+  id               String         @id @default(uuid()) @db.Uuid
+  municipalityId   String         @db.Uuid
+  municipality     Municipality   @relation(fields: [municipalityId], references: [id], onDelete: Restrict)
+  category         CensusCategory
+  originalFileName String         @db.VarChar(255)
+  fileChecksum     String         @db.VarChar(64)
+  totalRows        Int
+  validRows        Int
+  invalidRows      Int
+  duplicateRows    Int
+  importedRows     Int
+  createdById      String         @db.Uuid
+  createdBy        User           @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt        DateTime       @default(now())
+
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id             String        @id @default(uuid()) @db.Uuid
+  userId         String?       @db.Uuid
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  municipalityId String?       @db.Uuid
+  municipality   Municipality? @relation(fields: [municipalityId], references: [id], onDelete: SetNull)
+  action         String        @db.VarChar(60)
+  entityType     String?       @db.VarChar(60)
+  entityId       String?       @db.Uuid
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+
+  @@index([createdAt])
+  @@index([municipalityId, createdAt])
+}

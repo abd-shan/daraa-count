@@ -1,0 +1,18 @@
+# Only build inputs may leave the host. Environment files, workbooks, backups,
+# node_modules and local builds are excluded by default.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!prisma.config.ts
+!nest-cli.json
+!tsconfig.json
+!tsconfig.build.json
+!prisma/
+!prisma/**
+!src/
+!src/**
+**/*.spec.ts
+**/.env*
+**/*.xlsx
+**/*.dump
