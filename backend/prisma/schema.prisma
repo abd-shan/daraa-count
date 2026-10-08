@@ -24,10 +24,17 @@ enum MaritalStatus {
   DIVORCED
 }
 
+model Area {
+  name           String         @id @db.VarChar(150)
+  createdAt      DateTime       @default(now())
+  municipalities Municipality[]
+}
+
 model Municipality {
   id        String         @id @default(uuid()) @db.Uuid
   name      String         @unique @db.VarChar(150)
   areaName  String         @db.VarChar(150)
+  area      Area           @relation(fields: [areaName], references: [name], onDelete: Restrict, onUpdate: Cascade)
   isActive  Boolean        @default(true)
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
@@ -35,6 +42,8 @@ model Municipality {
   records   CensusRecord[]
   imports   ImportBatch[]
   auditLogs AuditLog[]
+
+  @@index([areaName])
 }
 
 model User {

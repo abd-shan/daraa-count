@@ -50,7 +50,7 @@ export function Home({ user }: { user: User }) {
                 </div>
               </dl>
               <Link className="secondary" to="/admin/municipalities">
-                إدارة البلديات والحسابات
+                إدارة البلديات
               </Link>
             </div>
           ) : (

@@ -33,7 +33,7 @@ export function navItems(user: User): NavItem[] {
       },
       {
         to: "/admin/municipalities",
-        label: "البلديات والحسابات",
+        label: "البلديات",
         short: "البلديات",
         icon: <MunicipalityIcon />,
       },

@@ -1,6 +1,8 @@
 # Frontend and backend integration guide
 
-This document describes the actual `count-daraa` implementation inspected on 2026-10-05. It covers all 22 HTTP endpoints, their request/response contracts, authorization, current React consumers and the behavior to preserve during frontend redesign.
+This document describes the actual `count-daraa` implementation inspected on 2026-10-08. It covers all 21 HTTP endpoints, their request/response contracts, authorization, current React consumers and the behavior to preserve during frontend redesign.
+
+Only SUPER_ADMIN can authenticate. Historical MUNICIPALITY user rows remain for census ownership/audit history, but login and existing sessions are rejected. Municipality-account management endpoints have been removed. Legacy municipality-role UI/service branches described below are dormant compatibility code, not active user workflows.
 
 Developer documentation is in English as required by `AGENTS.md`; product labels and API validation messages remain Arabic. Examples below use synthetic values. This is a source contract review, not a claim that browser acceptance tests were executed for this document.
 
@@ -12,7 +14,7 @@ Developer documentation is in English as required by `AGENTS.md`; product labels
 4. [Shared response contracts](#4-shared-response-contracts)
 5. [Authentication endpoints](#5-authentication-endpoints)
 6. [Record endpoints](#6-record-endpoints)
-7. [Municipality and account endpoints](#7-municipality-and-account-endpoints)
+7. [Municipality and area endpoints](#7-municipality-and-area-endpoints)
 8. [Excel endpoints](#8-excel-endpoints)
 9. [History and health endpoints](#9-history-and-health-endpoints)
 10. [Frontend routing and data flow](#10-frontend-routing-and-data-flow)
@@ -128,7 +130,7 @@ The TypeScript return type of each endpoint function is a compile-time assertion
 
 ## 3. Complete endpoint map
 
-All paths below include the actual `/api` prefix. `Authenticated` means either role; record access is always municipality-scoped for `MUNICIPALITY`.
+All paths below include the actual `/api` prefix. `Authenticated` means an active SUPER_ADMIN session. Historical MUNICIPALITY accounts cannot authenticate.
 
 | # | Method | Endpoint | Access | Hook | Consumer |
 | --- | --- | --- | --- | --- | --- |
@@ -147,8 +149,7 @@ All paths below include the actual `/api` prefix. `Authenticated` means either r
 | 13 | GET | `/api/admin/municipalities/options` | SUPER_ADMIN | `useMunicipalityOptionsQuery` | `Records.tsx`, `Imports.tsx` |
 | 14 | POST | `/api/admin/municipalities` | SUPER_ADMIN | `useCreateMunicipalityMutation` | Municipality creation dialog |
 | 15 | PATCH | `/api/admin/municipalities/:id` | SUPER_ADMIN | `useUpdateMunicipalityMutation` | Edit and enable/disable dialogs |
-| 16 | POST | `/api/admin/municipalities/:id/users` | SUPER_ADMIN | `useCreateAccountMutation` | Account creation dialog |
-| 17 | PATCH | `/api/admin/users/:id` | SUPER_ADMIN | `useUpdateAccountMutation` | Account status/password actions |
+| 16 | GET | `/api/admin/areas` | SUPER_ADMIN | `useAreasQuery` | Municipality editor suggestions |
 | 18 | POST | `/api/admin/imports/preview` | SUPER_ADMIN | `usePreviewImportMutation` | `Imports.tsx` |
 | 19 | POST | `/api/admin/imports/confirm` | SUPER_ADMIN | `useConfirmImportMutation` | `Imports.tsx` confirmation |
 | 20 | GET | `/api/admin/imports` | SUPER_ADMIN | `useImportsQuery` | Import history inside `Imports.tsx` |
@@ -182,16 +183,11 @@ Login and `/auth/me` return the user directly, without a `{ user: ... }` wrapper
 ```json
 {
   "id": "11111111-1111-4111-8111-111111111111",
-  "username": "municipality_demo",
-  "role": "MUNICIPALITY",
-  "municipalityId": "22222222-2222-4222-8222-222222222222",
+  "username": "administrator_demo",
+  "role": "SUPER_ADMIN",
+  "municipalityId": null,
   "isActive": true,
-  "municipality": {
-    "id": "22222222-2222-4222-8222-222222222222",
-    "name": "بلدية تجريبية",
-    "areaName": "منطقة تجريبية",
-    "isActive": true
-  }
+  "municipality": null
 }
 ```
 
@@ -270,7 +266,7 @@ await login({ username, password }).unwrap();
 dispatch(resetApiState());
 ```
 
-Disable the form during the request. The authenticated router then redirects a municipality user to `/` and an administrator to `/admin`.
+Disable the form during the request. A successful administrator login redirects to `/admin`; municipality-role credentials always return the generic 401.
 
 ### 2. GET `/api/auth/me`
 
@@ -463,110 +459,49 @@ The backend derives municipality scope from `actor.municipalityId` for municipal
 
 The same server scope applies to list, single read, create, update, delete, counts, duplicate checks and export. Administrator-only restore/import/municipality/account endpoints are guarded on the backend and return 403 to authenticated municipality callers.
 
-## 7. Municipality and account endpoints
+## 7. Municipality and area endpoints
 
 All endpoints in this section require SUPER_ADMIN. Their UI is [Municipalities.tsx](../frontend/src/pages/Municipalities.tsx).
 
-### Municipality and account response shapes
+### Municipality response shapes
 
-Municipality fields: `id`, `name`, `areaName`, `isActive`, `createdAt`, `updatedAt`.
-
-Safe account fields: `id`, `username`, `isActive`, `lastLoginAt`. No password or passwordHash is returned.
+Municipality fields: id, name, areaName, isActive, createdAt and updatedAt. Accounts are not returned.
 
 ### 12. GET `/api/admin/municipalities`
 
-Query: pagination and optional `search` (max 100, searches municipality name). Returns `Page<MunicipalityListItem>`; each item contains municipality fields plus:
-
-```json
-{
-  "users": [
-    {
-      "id": "11111111-1111-4111-8111-111111111111",
-      "username": "municipality_demo",
-      "isActive": true,
-      "lastLoginAt": null
-    }
-  ],
-  "_count": { "records": 12 }
-}
-```
-
-`_count.records` includes only active census records. Accounts are ordered by creation time; municipalities are ordered by name. Frontend query key: `['municipalities', page, debouncedSearch]`.
+Accepts page/pageSize and optional search (max 100 characters), matching municipality name or area name. Returns Page<MunicipalityListItem>; each item contains municipality fields and `_count: { records: number }` for non-deleted records. Rows are ordered by municipality name.
 
 ### 13. GET `/api/admin/municipalities/options`
 
-No pagination/search body. Returns a direct array of up to 5000 municipalities:
-
-```json
-[
-  {
-    "id": "22222222-2222-4222-8222-222222222222",
-    "name": "بلدية تجريبية",
-    "areaName": "منطقة تجريبية",
-    "isActive": true
-  }
-]
-```
-
-Includes inactive municipalities and their status. Use these in administrator filters; only active municipalities may be selected for new records/imports. The backend rechecks active state. Consumers share query key `['municipality-options']`. Municipality users never request this endpoint.
+Returns up to 5000 entries with id, name, areaName and isActive. Inactive municipalities remain available for administrator filtering; the backend requires an active municipality for new records/imports.
 
 ### 14. POST `/api/admin/municipalities`
 
-Creates the municipality and initial municipality account in one transaction.
+Creates only the municipality, saves/reuses the area and writes an audit event in the same transaction.
 
 ```json
-{
-  "name": "بلدية تجريبية",
-  "areaName": "منطقة تجريبية",
-  "username": "municipality_demo",
-  "password": "EXAMPLE_ONLY_NOT_A_REAL_PASSWORD"
-}
+{ "name": "بلدية تجريبية", "areaName": "منطقة تجريبية" }
 ```
 
-Validation: name/areaName required, max 150; username 3–80 Latin letters/digits/`.`/`_`/`-`, trimmed/lowercased; password 6–128 characters. Duplicate municipality names/usernames return 409.
-
-Response: municipality fields plus `users: [safeAccount]`. This mutation response does **not** include the list-only `_count` object; refresh the list instead of treating it as a complete list item. The server fixes the account role to MUNICIPALITY.
+Both fields are required strings (max 150), trimmed with repeated whitespace collapsed. No username/password fields are accepted. Duplicate municipality names return 409 and roll back any newly introduced area. Response: municipality fields, without the list-only _count.
 
 ### 15. PATCH `/api/admin/municipalities/:id`
 
-Accepted optional fields: `name`, `areaName`, `isActive`. Examples:
+Accepts optional name, areaName and isActive. A new area is saved in the same transaction; the former area remains available in the registry. Disabling preserves census records and prevents new entry/imports. Response: municipality fields, without _count. Confirm municipality disable in the UI.
+
+### 16. GET `/api/admin/areas`
+
+Returns an array of up to 5000 persisted, unique area names, sorted with Arabic collation. Names come from the Area table, not browser history or the current page of municipalities. The migration backfills all existing Municipality.areaName values and enforces a foreign key/index for future statistics.
 
 ```json
-{ "name": "اسم بلدية تجريبي", "areaName": "اسم منطقة تجريبي" }
+["إزرع", "الصنمين", "درعا"]
 ```
 
-```json
-{ "isActive": false }
-```
+The editor opens a compact list below the area input, permits filtering/keyboard selection, and also accepts new area names. It retains the last successfully saved area for the next municipality while the page is open. Cached areas refresh after municipality create/edit; a failed save retains inputs and does not change the last successful selection.
 
-Response: municipality fields, without `users` or `_count`. Disabling a municipality revokes its users' active sessions and retains census records. Enabling uses `isActive: true`; users must log in again after revocation. Require confirmation before disabling.
+### Removed account endpoints
 
-### 16. POST `/api/admin/municipalities/:id/users`
-
-Creates an additional account associated with exactly the municipality in the path.
-
-```json
-{
-  "username": "municipality_second",
-  "password": "EXAMPLE_ONLY_NOT_A_REAL_PASSWORD"
-}
-```
-
-Same username/password validation as initial creation. Response: `safeAccount`. The server assigns MUNICIPALITY role and path municipality; the frontend must not supply role or municipalityId in the body. A nonexistent municipality returns 404. An account for an inactive municipality cannot authenticate until the municipality is enabled.
-
-### 17. PATCH `/api/admin/users/:id`
-
-Accepted optional fields: `isActive`, `password`. Operates on municipality accounts only.
-
-```json
-{ "isActive": false }
-```
-
-```json
-{ "password": "EXAMPLE_ONLY_NOT_A_REAL_PASSWORD" }
-```
-
-Response: `safeAccount`. Password reset and disable revoke current sessions. Enable uses `isActive: true`; a disabled municipality still prevents login. This endpoint does not change username, municipality or role and does not reset SUPER_ADMIN credentials. Require clear confirmation/feedback for account disable and password reset. Never show an existing password.
+POST /admin/municipalities/:id/users and PATCH /admin/users/:id are no longer registered and return 404. The upgrade disables historical municipality users and revokes their sessions, preserving ownership and audit references. AuthService also rejects the historical role regardless of the isActive flag.
 
 ## 8. Excel endpoints
 
@@ -684,7 +619,7 @@ The current frontend enables confirmation only when `canConfirm` is true, validR
 
 If revalidation discovers hard row errors, the backend returns 400 with `code: 'INVALID_WORKBOOK'`, an Arabic message and an `errors` list. `ApiFailure.rows` carries that list through to the confirmation dialog, which lists the offending rows in place and leaves the preview on screen.
 
-No municipality import button, route, menu item or authorized API exists. A direct call by an authenticated municipality account returns 403.
+Municipality accounts cannot authenticate. Their old sessions return 401 on import and all other protected endpoints.
 
 ## 9. History and health endpoints
 
@@ -763,7 +698,7 @@ This is used for operational/container checks, not as a replacement for `/auth/m
 | `/poverty` | Authenticated | `Records`, category EXTREME_POVERTY | Same reusable workflow, no marital selector |
 | `/admin` | SUPER_ADMIN | `Home` | Global counts and municipality total |
 | `/admin/records` | SUPER_ADMIN | `Records` | Category/municipality filters, CRUD/export/deleted view/restore |
-| `/admin/municipalities` | SUPER_ADMIN | `Municipalities` | Municipality and account management |
+| `/admin/municipalities` | SUPER_ADMIN | `Municipalities` | Municipality management and saved area suggestions |
 | `/admin/imports` | SUPER_ADMIN | `Imports` | Options, preview, confirmation, history |
 | `/admin/audit` | SUPER_ADMIN | `Audit` | Paginated action-filtered audit history |
 
@@ -857,7 +792,8 @@ Freshness is declarative: each query declares what it provides, each mutation de
 | `Session` | `session` | — (cleared wholesale instead) |
 | `Record` | `records`, `record` | create/update/delete/restore record, confirm import |
 | `Summary` | `summary` | create/delete/restore record, confirm import, municipality create/update |
-| `Municipality` | `municipalities` | municipality + account mutations, create/delete/restore record, confirm import |
+| `Municipality` | `municipalities` | municipality mutations, create/delete/restore record, confirm import |
+| `Area` | `areas` | municipality create/update |
 | `MunicipalityOption` | `municipalityOptions` | municipality create/update |
 | `Import` | `imports` | confirm import |
 | `Audit` | `audit` | — see below |
@@ -874,7 +810,7 @@ Audited actions still do not invalidate `Audit`. The audit screen refreshes on m
 
 ### What is already connected
 
-Login/session/logout, home counts, record list/search/pagination/save/delete/restore/export, municipality/account management, admin import preview/confirmation/history and audit are implemented against real API calls. There are no public-registration or municipality-import flows.
+Login/session/logout, home counts, record list/search/pagination/save/delete/restore/export, municipality management and persistent area suggestions, admin import preview/confirmation/history and audit are implemented against real API calls. There are no public-registration or municipality-import flows.
 
 ### Available APIs without a current product request
 
@@ -884,7 +820,7 @@ Login/session/logout, home counts, record list/search/pagination/save/delete/res
 ### Improvements to make explicit before claiming complete browser integration
 
 1. Improve the cache freshness cases in section 12 when changing mutation hooks.
-2. Add frontend integration tests for admin account actions, multipart preview/confirm and binary download. The current form/home/records/api tests do not prove every browser workflow.
+2. Complete authenticated browser acceptance for municipality/area editing, multipart preview/confirm and binary download. The current form/home/records/api tests do not prove every browser workflow.
 3. Perform authenticated browser acceptance through the actual origin, and separately through production HTTPS. This document records code inspection, not a completed visual/mobile/browser verification.
 
 Resolved since the first revision of this document: confirmation-stage row `errors` are preserved by `ApiFailure.rows` and rendered by the confirmation dialog, and a failed confirmation now keeps the preview on screen instead of clearing it.
@@ -915,22 +851,17 @@ This checklist is for execution during frontend work; it is not a list of new ch
 - Logout revokes the session; browser Back does not restore authorized access.
 - A different origin is rejected on unsafe requests.
 
-### Municipality workflow
+### Retired account protection
 
-- Home shows exactly three cards and correctly handles zero counts.
-- Each category lists only the authenticated municipality, including during search/pagination/export.
-- Add/edit validates spouse/category rules and optional family count (positive when supplied).
-- Leading-zero identifiers survive save, reload and export.
-- Duplicate and stale-edit failures retain inputs and explain the problem.
-- Delete requires confirmation and updates counts/list; data is soft-deleted.
-- No municipality account requests admin options/import/history/audit/account endpoints.
-- Direct unauthorized admin/import API calls return 403; another municipality's record read/update/delete returns 404.
+- Municipality credentials and old sessions return 401 on protected operations.
+- Legacy account-creation/activation endpoints return 404.
+- Historical census records and audit ownership remain intact.
 
 ### Administrator workflow
 
-- Create municipality/account atomically; reject duplicate name/username.
-- Edit and enable/disable municipality/account with correct feedback and session revocation.
-- Password reset never displays an existing password.
+- Create municipality with name and area only; reject duplicate municipality names.
+- Saved area suggestions survive reload and municipality-area reassignment; last successful area is reused on the page.
+- Edit/enable/disable municipalities with correct feedback and preserve historical records.
 - Category/municipality/search filters and deleted-record restore work together.
 - Export generates the selected category and correct municipality scope.
 - Import preview writes nothing; hard errors block confirmation.
@@ -951,7 +882,7 @@ This checklist is for execution during frontend work; it is not a list of new ch
 - [Store and session guard](../frontend/src/store.ts), [API prefix configuration](../frontend/src/config.ts), [test helpers](../frontend/src/test-utils.tsx)
 - [Design tokens and base styles](../frontend/src/index.css), [shell and page layouts](../frontend/src/App.css), [shared UI components](../frontend/src/components/ui.tsx)
 - [Record form](../frontend/src/components/RecordForm.tsx), [record page](../frontend/src/pages/Records.tsx)
-- [Municipality/account UI](../frontend/src/pages/Municipalities.tsx), [import UI](../frontend/src/pages/Imports.tsx), [audit UI](../frontend/src/pages/Audit.tsx)
+- [Municipality/area UI](../frontend/src/pages/Municipalities.tsx), [import UI](../frontend/src/pages/Imports.tsx), [audit UI](../frontend/src/pages/Audit.tsx)
 - [Backend validation](../backend/src/common/validation.ts), [HTTP errors/CSRF](../backend/src/common/http.ts)
 - [Authentication](../backend/src/auth/auth.controller.ts), [record service](../backend/src/records/records.service.ts)
 - [Municipality service](../backend/src/municipalities/municipalities.service.ts), [Excel service](../backend/src/excel/excel.service.ts), [history service](../backend/src/history/history.service.ts)

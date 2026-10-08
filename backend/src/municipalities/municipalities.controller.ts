@@ -15,6 +15,9 @@ import { MunicipalitiesService } from './municipalities.service';
 @Controller('admin')
 export class MunicipalitiesController {
   constructor(private readonly municipalities: MunicipalitiesService) {}
+  @Get('areas') areas(@Req() req: AuthRequest) {
+    return this.municipalities.areas(req.actor);
+  }
   @Get('municipalities') list(
     @Req() req: AuthRequest,
     @Query() query: unknown,
@@ -36,19 +39,5 @@ export class MunicipalitiesController {
     @Body() body: unknown,
   ) {
     return this.municipalities.update(req.actor, id, body);
-  }
-  @Post('municipalities/:id/users') account(
-    @Req() req: AuthRequest,
-    @Param('id') id: string,
-    @Body() body: unknown,
-  ) {
-    return this.municipalities.createAccount(req.actor, id, body);
-  }
-  @Patch('users/:id') user(
-    @Req() req: AuthRequest,
-    @Param('id') id: string,
-    @Body() body: unknown,
-  ) {
-    return this.municipalities.updateAccount(req.actor, id, body);
   }
 }

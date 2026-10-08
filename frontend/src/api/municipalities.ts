@@ -7,14 +7,9 @@ export interface MunicipalityPayload {
   areaName: string;
 }
 
-export interface AccountPayload {
-  username: string;
-  password: string;
-}
-
 export const municipalitiesApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
-    /** GET /admin/municipalities — full records with accounts and counts. */
+    /** GET /admin/municipalities — municipalities with record counts. */
     municipalities: build.query<
       Page<Municipality>,
       { page: number; search: string }
@@ -27,17 +22,23 @@ export const municipalitiesApi = baseApi.injectEndpoints({
       query: () => "/admin/municipalities/options",
       providesTags: ["MunicipalityOption"],
     }),
-    /** POST /admin/municipalities — creates the municipality and first account. */
-    createMunicipality: build.mutation<
-      Municipality,
-      MunicipalityPayload & AccountPayload
-    >({
+    areas: build.query<string[], void>({
+      query: () => "/admin/areas",
+      providesTags: ["Area"],
+    }),
+    /** POST /admin/municipalities — creates only the municipality. */
+    createMunicipality: build.mutation<MunicipalityOption, MunicipalityPayload>({
       query: (body) => ({ url: "/admin/municipalities", method: "POST", body }),
-      invalidatesTags: ["Municipality", "MunicipalityOption", "Summary"],
+      invalidatesTags: [
+        "Municipality",
+        "MunicipalityOption",
+        "Area",
+        "Summary",
+      ],
     }),
     /** PATCH /admin/municipalities/:id — rename, or enable/disable. */
     updateMunicipality: build.mutation<
-      Municipality,
+      MunicipalityOption,
       { id: string; body: MunicipalityPayload | { isActive: boolean } }
     >({
       query: ({ id, body }) => ({
@@ -45,35 +46,12 @@ export const municipalitiesApi = baseApi.injectEndpoints({
         method: "PATCH",
         body,
       }),
-      invalidatesTags: ["Municipality", "MunicipalityOption", "Summary"],
-    }),
-    /** POST /admin/municipalities/:id/users — adds another committee account. */
-    createAccount: build.mutation<
-      unknown,
-      { municipalityId: string; body: AccountPayload }
-    >({
-      query: ({ municipalityId, body }) => ({
-        url: "/admin/municipalities/" + municipalityId + "/users",
-        method: "POST",
-        body,
-      }),
-      invalidatesTags: ["Municipality"],
-    }),
-    /**
-     * PATCH /admin/users/:id — resets the password or changes the account
-     * status. Both revoke the account's current sessions. An existing password
-     * is never returned by any endpoint and is never displayed.
-     */
-    updateAccount: build.mutation<
-      unknown,
-      { id: string; body: { password: string } | { isActive: boolean } }
-    >({
-      query: ({ id, body }) => ({
-        url: "/admin/users/" + id,
-        method: "PATCH",
-        body,
-      }),
-      invalidatesTags: ["Municipality"],
+      invalidatesTags: [
+        "Municipality",
+        "MunicipalityOption",
+        "Area",
+        "Summary",
+      ],
     }),
   }),
 });
@@ -83,6 +61,5 @@ export const {
   useMunicipalityOptionsQuery,
   useCreateMunicipalityMutation,
   useUpdateMunicipalityMutation,
-  useCreateAccountMutation,
-  useUpdateAccountMutation,
+  useAreasQuery,
 } = municipalitiesApi;

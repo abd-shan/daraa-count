@@ -18,6 +18,7 @@ export const tagTypes = [
   "Summary",
   "Municipality",
   "MunicipalityOption",
+  "Area",
   "Import",
   "Audit",
 ] as const;

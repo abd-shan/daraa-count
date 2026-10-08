@@ -54,10 +54,12 @@ async function main() {
         type: argon2.argon2id,
       });
       const fixture = await db.$transaction(async (tx) => {
+        const areaName = 'منطقة تجريبية ' + run;
+        await tx.area.create({ data: { name: areaName } });
         const municipality = await tx.municipality.create({
           data: {
             name: 'بلدية اختبار الواجهة ' + run,
-            areaName: 'منطقة تجريبية',
+            areaName,
           },
         });
         const admin = await tx.user.create({
@@ -89,6 +91,7 @@ async function main() {
         });
         return {
           municipalityId: municipality.id,
+          areaName,
           userIds: [admin.id, user.id],
           adminUsername: admin.username,
           municipalityUsername: user.username,
@@ -123,6 +126,7 @@ async function main() {
         });
         await tx.user.deleteMany({ where: { id: { in: fixture.userIds } } });
         await tx.municipality.delete({ where: { id: fixture.municipalityId } });
+        await tx.area.delete({ where: { name: fixture.areaName } });
       });
       fs.unlinkSync(fixturePath);
       console.log('Synthetic browser fixture removed.');

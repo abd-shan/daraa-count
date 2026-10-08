@@ -6,7 +6,7 @@
  *   searchParams.ts   query-string builder that drops empty filters
  *   auth.ts           /auth/*
  *   records.ts        /records/*            (both roles, municipality-scoped)
- *   municipalities.ts /admin/municipalities/*, /admin/users/*  (SUPER_ADMIN)
+ *   municipalities.ts /admin/municipalities/*, /admin/areas  (SUPER_ADMIN)
  *   imports.ts        /admin/imports/*                         (SUPER_ADMIN)
  *   audit.ts          /admin/audit                             (SUPER_ADMIN)
  *
@@ -40,13 +40,12 @@ export {
   useUpdateRecordMutation,
 } from "./records";
 
-export type { AccountPayload, MunicipalityPayload } from "./municipalities";
+export type { MunicipalityPayload } from "./municipalities";
 export {
-  useCreateAccountMutation,
   useCreateMunicipalityMutation,
+  useAreasQuery,
   useMunicipalitiesQuery,
   useMunicipalityOptionsQuery,
-  useUpdateAccountMutation,
   useUpdateMunicipalityMutation,
 } from "./municipalities";
 

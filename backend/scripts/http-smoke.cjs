@@ -47,13 +47,13 @@ async function main() {
     if (!cookie) throw Error('No session cookie');
     return cookie;
   };
-  const municipalityCookie = await signIn(fixture.municipalityUsername);
+  const municipalityCookie = await signIn(fixture.adminUsername);
   const summary = await (
     await api('/records/summary', municipalityCookie)
   ).json();
   if (summary.counts.MARTYR !== 1) throw Error('Wrong category total');
   const file = await api(
-    '/records/export/xlsx?category=MARTYR',
+    '/records/export/xlsx?category=MARTYR&municipalityId=' + fixture.municipalityId,
     municipalityCookie,
   );
   const book = new ExcelJS.Workbook();
@@ -63,12 +63,15 @@ async function main() {
     book.worksheets[0].getCell('E6').value !== '0012345'
   )
     throw Error('Export RTL/leading zeros lost');
-  const denied = await fetch(origin + '/api/admin/imports', {
-    headers: { Cookie: municipalityCookie },
+  const denied = await fetch(origin + '/api/auth/login', {
+    method: 'POST',
+    headers: { Origin: origin, 'X-Count-Daraa': '1', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: fixture.municipalityUsername, password: fixture.password }),
   });
-  if (denied.status !== 403) throw Error('Admin isolation failed');
+  if (denied.status !== 401) throw Error('Retired municipality account login was allowed');
   const input = {
     category: 'WAR_INJURED',
+    municipalityId: fixture.municipalityId,
     personName: 'اسم مصطنع لفحص الاستقرار',
     maritalStatus: 'مطلقة',
     familyMembersCount: '',
@@ -134,7 +137,7 @@ async function main() {
   await api('/admin/audit', adminCookie);
   await api('/auth/logout', adminCookie, 'POST');
   console.log(
-    'Built frontend/backend same-origin smoke passed: sessions, CRUD, null counts, marital aliases, role isolation, Arabic export, import and duplicates.',
+    'Built frontend/backend same-origin smoke passed: admin sessions, retired account denial, CRUD, null counts, marital aliases, Arabic export, import and duplicates.',
   );
 }
 main().catch((error) => {

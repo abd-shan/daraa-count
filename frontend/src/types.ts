@@ -36,14 +36,7 @@ export interface Page<T> {
   page: number;
   pageSize: number;
 }
-export interface MunicipalityAccount {
-  id: string;
-  username: string;
-  isActive: boolean;
-  lastLoginAt: string | null;
-}
 export interface Municipality extends MunicipalityOption {
-  users: MunicipalityAccount[];
   _count: { records: number };
 }
 export interface Summary {
@@ -61,7 +54,11 @@ export interface ImportPreview {
   duplicateRows: number;
   errors: RowIssue[];
   warnings: RowIssue[];
-  sample: { row: number; personName: string; familyMembersCount: number | null }[];
+  sample: {
+    row: number;
+    personName: string;
+    familyMembersCount: number | null;
+  }[];
   canConfirm: boolean;
 }
 export interface ImportResult {

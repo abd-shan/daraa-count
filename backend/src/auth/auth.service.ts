@@ -20,12 +20,7 @@ export class AuthService {
       user?.passwordHash ?? (await this.dummyHash),
       password,
     );
-    if (
-      !valid ||
-      !user ||
-      !user.isActive ||
-      (user.role === 'MUNICIPALITY' && !user.municipality?.isActive)
-    ) {
+    if (!valid || !user || !user.isActive || user.role !== 'SUPER_ADMIN') {
       await audit(this.db, null, 'LOGIN_FAILED');
       throw new UnauthorizedException('اسم المستخدم أو كلمة المرور غير صحيحة');
     }
@@ -44,7 +39,7 @@ export class AuthService {
         !current ||
         current.passwordHash !== user.passwordHash ||
         !current.isActive ||
-        (current.role === 'MUNICIPALITY' && !current.municipality?.isActive)
+        current.role !== 'SUPER_ADMIN'
       )
         throw new UnauthorizedException(
           'اسم المستخدم أو كلمة المرور غير صحيحة',
@@ -76,8 +71,7 @@ export class AuthService {
       session.revokedAt ||
       session.expiresAt <= new Date() ||
       !session.user.isActive ||
-      (session.user.role === 'MUNICIPALITY' &&
-        !session.user.municipality?.isActive)
+      session.user.role !== 'SUPER_ADMIN'
     )
       throw new UnauthorizedException(
         'انتهت جلسة الدخول. يرجى تسجيل الدخول مجدداً',

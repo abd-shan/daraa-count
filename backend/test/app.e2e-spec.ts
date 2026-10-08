@@ -1,7 +1,7 @@
 import { configureTestDatabase, testDatabaseUrl } from './database';
 import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import * as argon2 from 'argon2';
 import * as ExcelJS from 'exceljs';
@@ -10,6 +10,7 @@ import type { Response as TestResponse } from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { configureHttp } from '../src/common/http';
+import { readConfig } from '../src/config';
 import { headers } from '../src/excel/headers';
 configureTestDatabase();
 process.env.MAX_IMPORT_ROWS = '3';
@@ -38,7 +39,6 @@ interface RecordResponse {
 }
 interface MunicipalityResponse {
   id: string;
-  users: Array<{ id: string; username: string }>;
 }
 interface PreviewResponse {
   totalRows: number;
@@ -114,12 +114,8 @@ const binary = (
 };
 describe('V1 real PostgreSQL HTTP integration', () => {
   let app: INestApplication, db: PrismaService, http: Server;
-  let adminId: string,
-    aId: string,
-    bId: string,
-    aUserId: string,
-    bUserId: string;
-  let adminCookie: string, aCookie: string, bCookie: string;
+  let adminId: string, aId: string, bId: string, legacyUserId: string;
+  let adminCookie: string, legacyCookie: string;
   let aRecord: RecordResponse, bRecord: RecordResponse;
   const municipalities: string[] = [],
     users: string[] = [];
@@ -130,6 +126,12 @@ describe('V1 real PostgreSQL HTTP integration', () => {
   ) => {
     const req = request(http)[method]('/api' + path);
     req.set('Origin', origin).set('X-Count-Daraa', '1');
+    if (
+      cookie === adminCookie &&
+      (method === 'post' || method === 'patch') &&
+      (path === '/records' || /^\/records\/[^/]+$/.test(path))
+    )
+      req.send({ municipalityId: aId });
     return cookie ? req.set('Cookie', cookie) : req;
   };
   async function login(username: string) {
@@ -166,7 +168,7 @@ describe('V1 real PostgreSQL HTTP integration', () => {
       .query({
         category: 'MARTYR',
         ...filters,
-        ...(municipalityId ? { municipalityId } : {}),
+        ...(municipalityId ? { municipalityId } : { municipalityId: aId }),
       })
       .set('Cookie', cookie)
       .buffer(true)
@@ -210,31 +212,47 @@ describe('V1 real PostgreSQL HTTP integration', () => {
       const res = await unsafe('post', '/admin/municipalities', adminCookie)
         .send({
           name: 'بلدية اختبار ' + letter + '-' + run,
-          areaName: 'منطقة اختبار',
-          username: letter + '-' + run,
-          password,
+          areaName: 'منطقة اختبار-' + run,
         })
         .expect(201);
       const item = body<MunicipalityResponse>(res);
       municipalities.push(item.id);
-      users.push(item.users[0].id);
       if (letter === 'a') {
         aId = item.id;
-        aUserId = item.users[0].id;
       } else {
         bId = item.id;
-        bUserId = item.users[0].id;
       }
     }
-    aCookie = await login('a-' + run);
-    bCookie = await login('b-' + run);
+    const legacy = await db.user.create({
+      data: {
+        username: 'legacy-' + run,
+        passwordHash: await argon2.hash(password, { type: argon2.argon2id }),
+        role: 'MUNICIPALITY',
+        municipalityId: aId,
+        isActive: true,
+      },
+    });
+    legacyUserId = legacy.id;
+    users.push(legacy.id);
+    const token = randomBytes(32).toString('base64url');
+    await db.session.create({
+      data: {
+        userId: legacy.id,
+        tokenHash: createHash('sha256').update(token).digest('hex'),
+        expiresAt: new Date(Date.now() + 3600000),
+      },
+    });
+    legacyCookie = readConfig().SESSION_COOKIE_NAME + '=' + token;
     aRecord = body<RecordResponse>(
-      await unsafe('post', '/records', aCookie).send(recordInput).expect(201),
+      await unsafe('post', '/records', adminCookie)
+        .send(recordInput)
+        .expect(201),
     );
     bRecord = body<RecordResponse>(
-      await unsafe('post', '/records', bCookie)
+      await unsafe('post', '/records', adminCookie)
         .send({
           ...recordInput,
+          municipalityId: bId,
           personName: 'اسم سري لبلدية أخرى',
           nationalId: '00002',
         })
@@ -265,6 +283,12 @@ describe('V1 real PostgreSQL HTTP integration', () => {
         await tx.municipality.deleteMany({
           where: { id: { in: municipalities } },
         });
+        await tx.area.deleteMany({
+          where: {
+            name: { endsWith: '-' + run },
+            municipalities: { none: {} },
+          },
+        });
       });
     }
     if (app) await app.close();
@@ -272,11 +296,11 @@ describe('V1 real PostgreSQL HTTP integration', () => {
   it('authenticates with an opaque hashed session and does not expose password material', async () => {
     const res = await request(http)
       .get('/api/auth/me')
-      .set('Cookie', aCookie)
+      .set('Cookie', adminCookie)
       .expect(200);
-    expect(body<{ municipalityId: string }>(res).municipalityId).toBe(aId);
+    expect(body<{ role: string }>(res).role).toBe('SUPER_ADMIN');
     expect(res.body).not.toHaveProperty('passwordHash');
-    const raw = aCookie.split('=')[1],
+    const raw = adminCookie.split('=')[1],
       hashed = createHash('sha256').update(raw).digest('hex');
     expect(
       await db.session.findUnique({ where: { tokenHash: hashed } }),
@@ -291,7 +315,7 @@ describe('V1 real PostgreSQL HTTP integration', () => {
       .send({ username: 'nonexistent-' + run, password })
       .expect(401);
     const wrong = await unsafe('post', '/auth/login')
-      .send({ username: 'a-' + run, password: 'wrong' })
+      .send({ username: 'admin-' + run, password: 'wrong' })
       .expect(401);
     expect(body<{ message: string }>(missing).message).toBe(
       body<{ message: string }>(wrong).message,
@@ -300,52 +324,91 @@ describe('V1 real PostgreSQL HTTP integration', () => {
   it('rejects unsafe requests with missing or foreign Origin/custom header', async () => {
     await request(http)
       .post('/api/records')
-      .set('Cookie', aCookie)
+      .set('Cookie', adminCookie)
       .send(recordInput)
       .expect(403);
     await request(http)
       .post('/api/records')
-      .set('Cookie', aCookie)
+      .set('Cookie', adminCookie)
       .set('Origin', 'https://evil.example')
       .set('X-Count-Daraa', '1')
       .send(recordInput)
       .expect(403);
     await request(http)
       .post('/api/records')
-      .set('Cookie', aCookie)
+      .set('Cookie', adminCookie)
       .set('Origin', origin)
       .send(recordInput)
       .expect(403);
   });
-  it('ignores forged municipality query/header values on lists, counts and lookup searches', async () => {
-    const res = await request(http)
+  it('blocks legacy municipality login and all existing-session operations without losing records', async () => {
+    await unsafe('post', '/auth/login')
+      .send({ username: 'legacy-' + run, password })
+      .expect(401);
+    for (const route of [
+      '/auth/me',
+      '/records',
+      '/records/summary',
+      '/records/' + bRecord.id,
+      '/records/export/xlsx?category=MARTYR',
+      '/admin/municipalities',
+      '/admin/areas',
+    ])
+      await request(http)
+        .get('/api' + route)
+        .set('Cookie', legacyCookie)
+        .expect(401);
+    await unsafe('post', '/records', legacyCookie)
+      .send({ ...recordInput, municipalityId: bId })
+      .expect(401);
+    await unsafe('patch', '/records/' + bRecord.id, legacyCookie)
+      .send(recordInput)
+      .expect(401);
+    await unsafe('delete', '/records/' + bRecord.id, legacyCookie).expect(401);
+    const file = await workbook();
+    await upload('preview', file, legacyCookie).expect(401);
+    await upload('confirm', file, legacyCookie).expect(401);
+    expect(
+      await db.user.findUnique({ where: { id: legacyUserId } }),
+    ).not.toBeNull();
+    expect(
+      await db.censusRecord.findUnique({ where: { id: aRecord.id } }),
+    ).not.toBeNull();
+  });
+  it('removes account creation and activation endpoints', async () => {
+    await unsafe('post', '/admin/municipalities/' + aId + '/users', adminCookie)
+      .send({ username: 'extra-' + run, password })
+      .expect(404);
+    await unsafe('patch', '/admin/users/' + legacyUserId, adminCookie)
+      .send({ isActive: true })
+      .expect(404);
+  });
+  it('administrator can select a municipality and export Arabic, RTL and leading-zero identifiers', async () => {
+    const result = await request(http)
       .get('/api/records')
       .query({ municipalityId: bId })
-      .set('Cookie', aCookie)
-      .set('municipalityId', bId)
-      .set('X-Municipality-Id', bId)
+      .set('Cookie', adminCookie)
       .expect(200);
-    const data = body<{ items: RecordResponse[]; total: number }>(res);
-    expect(data.items.every((r) => r.municipalityId === aId)).toBe(true);
-    expect(data.items.map((r) => r.id)).not.toContain(bRecord.id);
-    const search = await request(http)
-      .get('/api/records')
-      .query({ municipalityId: bId, search: '00002' })
-      .set('Cookie', aCookie)
-      .expect(200);
-    expect(body<{ total: number }>(search).total).toBe(0);
-    const summary = await request(http)
-      .get('/api/records/summary')
-      .set('Cookie', aCookie)
-      .set('X-Municipality-Id', bId)
-      .expect(200);
-    expect(body<{ counts: { MARTYR: number } }>(summary).counts.MARTYR).toBe(1);
+    expect(
+      body<{ items: RecordResponse[] }>(result).items.map((item) => item.id),
+    ).toEqual([bRecord.id]);
+    const book = await readExport(adminCookie, aId);
+    expect(book.worksheets).toHaveLength(1);
+    const sheet = book.worksheets[0];
+    expect(sheet.views[0].rightToLeft).toBe(true);
+    expect(sheet.getCell('E6').value).toBe('00001');
+    expect(sheet.getCell('F6').value).toBe('00045');
+    expect(sheet.getCell('I6').value).toBe("'=1+1");
+    await request(http)
+      .get('/api/records/not-a-uuid')
+      .set('Cookie', adminCookie)
+      .expect(400);
   });
   it('filters lists, counts and exports by status while preserving municipality isolation', async () => {
     const statuses = ['SINGLE', 'MARRIED', 'WIDOWED', 'DIVORCED'];
     const localIds: string[] = [];
     for (const maritalStatus of statuses) {
-      const created = await unsafe('post', '/records', aCookie)
+      const created = await unsafe('post', '/records', adminCookie)
         .send({
           ...recordInput,
           category: 'WAR_INJURED',
@@ -357,10 +420,11 @@ describe('V1 real PostgreSQL HTTP integration', () => {
       localIds.push(body<RecordResponse>(created).id);
     }
     const foreign = body<RecordResponse>(
-      await unsafe('post', '/records', bCookie)
+      await unsafe('post', '/records', adminCookie)
         .send({
           ...recordInput,
           category: 'WAR_INJURED',
+          municipalityId: bId,
           nationalId: null,
         })
         .expect(201),
@@ -372,14 +436,14 @@ describe('V1 real PostgreSQL HTTP integration', () => {
           .query({
             category: 'WAR_INJURED',
             maritalStatus,
-            municipalityId: bId,
+            municipalityId: aId,
           })
-          .set('Cookie', aCookie)
+          .set('Cookie', adminCookie)
           .expect(200);
         const data = body<{ items: RecordResponse[]; total: number }>(filtered);
         expect(data.total).toBe(1);
         expect(data.items.map((item) => item.id)).toEqual([localIds[index]]);
-        const book = await readExport(aCookie, bId, {
+        const book = await readExport(adminCookie, aId, {
           category: 'WAR_INJURED',
           maritalStatus,
         });
@@ -404,150 +468,29 @@ describe('V1 real PostgreSQL HTTP integration', () => {
       await request(http)
         .get('/api/records')
         .query({ maritalStatus: 'unknown' })
-        .set('Cookie', aCookie)
+        .set('Cookie', adminCookie)
         .expect(400);
       await request(http)
         .get('/api/records/export/xlsx')
         .query({ category: 'WAR_INJURED', maritalStatus: 'unknown' })
-        .set('Cookie', aCookie)
+        .set('Cookie', adminCookie)
         .expect(400);
     } finally {
       for (const id of [...localIds, foreign.id])
         await unsafe('delete', '/records/' + id, adminCookie).expect(200);
     }
   });
-  it('does not reveal another municipality record by ID or forged municipality param', async () => {
-    await request(http)
-      .get('/api/records/' + bRecord.id)
-      .set('Cookie', aCookie)
-      .expect(404);
-    await request(http)
-      .get('/api/municipalities/' + bId + '/records')
-      .set('Cookie', aCookie)
-      .expect(404);
-    await request(http)
-      .get('/api/records/not-a-uuid')
-      .set('Cookie', aCookie)
-      .expect(400);
-  });
-  it('cannot update or delete another municipality record', async () => {
-    await unsafe('patch', '/records/' + bRecord.id, aCookie)
-      .send({ ...recordInput, municipalityId: bId })
-      .expect(404);
-    await unsafe('delete', '/records/' + bRecord.id, aCookie).expect(404);
-    const item = await db.censusRecord.findUniqueOrThrow({
-      where: { id: bRecord.id },
-    });
-    expect(item.deletedAt).toBeNull();
-    expect(item.personName).toBe('اسم سري لبلدية أخرى');
-  });
-  it('derives municipality on create/update from the session despite a forged body', async () => {
-    const created = await unsafe('post', '/records', aCookie)
-      .send({ ...recordInput, nationalId: '00002', municipalityId: bId })
-      .expect(201);
-    const item = body<RecordResponse>(created);
-    expect(item.municipalityId).toBe(aId);
-    const updated = await unsafe('patch', '/records/' + item.id, aCookie)
-      .send({
-        ...recordInput,
-        nationalId: '00002',
-        municipalityId: bId,
-        phone: '٠٩٠٠٠٠٠٠٠٠',
-      })
-      .expect(200);
-    expect(body<RecordResponse>(updated).municipalityId).toBe(aId);
-  });
-  it('cannot import or access any admin endpoint', async () => {
-    const file = await workbook();
-    await upload('preview', file, aCookie).expect(403);
-    await upload('confirm', file, aCookie).expect(403);
-    for (const path of [
-      '/admin/municipalities',
-      '/admin/municipalities/options',
-      '/admin/imports',
-      '/admin/audit',
-    ])
-      await request(http)
-        .get('/api' + path)
-        .set('Cookie', aCookie)
-        .expect(403);
-    await unsafe('post', '/admin/municipalities', aCookie).send({}).expect(403);
-    await unsafe('patch', '/admin/users/' + bUserId, aCookie)
-      .send({ isActive: false })
-      .expect(403);
-    await unsafe('post', '/records/' + bRecord.id + '/restore', aCookie).expect(
-      403,
-    );
-  });
-  it('exports only its own records with Arabic headers, RTL, metadata, text identifiers and safe formulas', async () => {
-    const book = await readExport(aCookie, bId);
-    expect(book.worksheets).toHaveLength(1);
-    const sheet = book.worksheets[0];
-    expect(sheet.views[0].rightToLeft).toBe(true);
-    expect(sheet.getRow(5).values).toEqual([
-      undefined,
-      ...headers('MARTYR').map((h) => h[1]),
-    ]);
-    expect(sheet.getCell('A1').value).toContain('منطقة اختبار');
-    expect(sheet.getCell('A2').value).toContain('بلدية اختبار a-' + run);
-    const rows: string[] = [];
-    sheet.eachRow((row) => rows.push(JSON.stringify(row.values)));
-    expect(rows.join(' ')).not.toContain('اسم سري لبلدية أخرى');
-    const exported = sheet.getRow(6);
-    expect(exported.getCell(5).type).toBe(ExcelJS.ValueType.String);
-    expect(exported.getCell(5).numFmt).toBe('@');
-    expect(String(exported.getCell(5).value)).toMatch(/^0000/);
-    expect(exported.getCell(6).value).toBe('00045');
-    expect(String(exported.getCell(8).value)).toMatch(/^0/);
-    expect(exported.getCell(9).value).toBe("'=1+1");
-  });
-  it('allows admin access across municipalities and filtered/all-municipality exports', async () => {
-    await request(http)
-      .get('/api/records/' + bRecord.id)
-      .set('Cookie', adminCookie)
-      .expect(200);
-    const res = await request(http)
-      .get('/api/records')
-      .query({ municipalityId: bId })
-      .set('Cookie', adminCookie)
-      .expect(200);
-    expect(
-      body<{ items: RecordResponse[] }>(res).items.every(
-        (r) => r.municipalityId === bId,
-      ),
-    ).toBe(true);
-    const all = await readExport(adminCookie);
-    expect(all.worksheets.length).toBeGreaterThanOrEqual(2);
-    const exportedMunicipalities = all.worksheets.map((sheet) =>
-      String(sheet.getCell('A2').value),
-    );
-    expect(
-      exportedMunicipalities.some((value) =>
-        value.includes('بلدية اختبار a-' + run),
-      ),
-    ).toBe(true);
-    expect(
-      exportedMunicipalities.some((value) =>
-        value.includes('بلدية اختبار b-' + run),
-      ),
-    ).toBe(true);
-    const filtered = await readExport(adminCookie, bId);
-    expect(filtered.worksheets).toHaveLength(1);
-    expect(filtered.worksheets[0].getCell('A2').value).toContain(
-      'بلدية اختبار b-',
-    );
-  });
   it('enforces pagination and authoritative validation/marital rules', async () => {
     const result = await request(http)
       .get('/api/records')
       .query({ page: 1, pageSize: 1 })
-      .set('Cookie', aCookie)
+      .set('Cookie', adminCookie)
       .expect(200);
     expect(body<{ items: unknown[] }>(result).items).toHaveLength(1);
     await request(http)
       .get('/api/records')
       .query({ pageSize: 101 })
-      .set('Cookie', aCookie)
+      .set('Cookie', adminCookie)
       .expect(400);
     for (const changes of [
       { familyMembersCount: 0 },
@@ -558,10 +501,10 @@ describe('V1 real PostgreSQL HTTP integration', () => {
       { nationalId: 123 },
       { createdById: adminId },
     ])
-      await unsafe('post', '/records', aCookie)
+      await unsafe('post', '/records', adminCookie)
         .send({ ...recordInput, ...changes })
         .expect(400);
-    const poverty = await unsafe('post', '/records', aCookie)
+    const poverty = await unsafe('post', '/records', adminCookie)
       .send({
         ...recordInput,
         category: 'EXTREME_POVERTY',
@@ -577,7 +520,7 @@ describe('V1 real PostgreSQL HTTP integration', () => {
       'أرملة',
       'مطلقة',
     ].entries()) {
-      const created = await unsafe('post', '/records', aCookie)
+      const created = await unsafe('post', '/records', adminCookie)
         .send({
           ...recordInput,
           nationalId: '0090' + index,
@@ -598,7 +541,7 @@ describe('V1 real PostgreSQL HTTP integration', () => {
           .familyMembersCount,
       ).toBeNull();
     }
-    const exported = await readExport(aCookie);
+    const exported = await readExport(adminCookie);
     for (const [index, nationalId] of [
       '00900',
       '00901',
@@ -619,10 +562,10 @@ describe('V1 real PostgreSQL HTTP integration', () => {
     }
   });
   it('prevents duplicates in the same scope and serializes simultaneous creates', async () => {
-    await unsafe('post', '/records', aCookie).send(recordInput).expect(409);
+    await unsafe('post', '/records', adminCookie).send(recordInput).expect(409);
     const results = await Promise.all(
       [1, 2].map(() =>
-        unsafe('post', '/records', aCookie).send({
+        unsafe('post', '/records', adminCookie).send({
           ...recordInput,
           nationalId: '00066',
         }),
@@ -636,14 +579,14 @@ describe('V1 real PostgreSQL HTTP integration', () => {
     ).toBe(1);
   });
   it('rejects stale edits and audits changed fields without sensitive values', async () => {
-    const updated = await unsafe('patch', '/records/' + aRecord.id, aCookie)
+    const updated = await unsafe('patch', '/records/' + aRecord.id, adminCookie)
       .send({
         ...recordInput,
         phone: '0999999999',
         expectedUpdatedAt: aRecord.updatedAt,
       })
       .expect(200);
-    await unsafe('patch', '/records/' + aRecord.id, aCookie)
+    await unsafe('patch', '/records/' + aRecord.id, adminCookie)
       .send({ ...recordInput, expectedUpdatedAt: aRecord.updatedAt })
       .expect(409);
     aRecord = body<RecordResponse>(updated);
@@ -657,22 +600,22 @@ describe('V1 real PostgreSQL HTTP integration', () => {
     expect(JSON.stringify(logs)).not.toContain('0999999999');
   });
   it('soft deletes, excludes deleted records from lookup/count/export/duplicates, and admin restores', async () => {
-    await unsafe('delete', '/records/' + aRecord.id, aCookie).expect(200);
+    await unsafe('delete', '/records/' + aRecord.id, adminCookie).expect(200);
     expect(
       (await db.censusRecord.findUniqueOrThrow({ where: { id: aRecord.id } }))
         .deletedAt,
     ).not.toBeNull();
     await request(http)
       .get('/api/records/' + aRecord.id)
-      .set('Cookie', aCookie)
+      .set('Cookie', adminCookie)
       .expect(404);
     const search = await request(http)
       .get('/api/records')
-      .query({ category: 'MARTYR', search: '00001' })
-      .set('Cookie', aCookie)
+      .query({ municipalityId: aId, category: 'MARTYR', search: '00001' })
+      .set('Cookie', adminCookie)
       .expect(200);
     expect(body<{ total: number }>(search).total).toBe(0);
-    const book = await readExport(aCookie);
+    const book = await readExport(adminCookie);
     const ids: unknown[] = [];
     book.worksheets[0].eachRow((row, index) => {
       if (index > 5) ids.push(row.getCell(5).value);
@@ -681,17 +624,21 @@ describe('V1 real PostgreSQL HTTP integration', () => {
     await request(http)
       .get('/api/records')
       .query({ deleted: 'true' })
-      .set('Cookie', aCookie)
-      .expect(403);
+      .set('Cookie', adminCookie)
+      .expect(200);
     const replacement = body<RecordResponse>(
-      await unsafe('post', '/records', aCookie).send(recordInput).expect(201),
+      await unsafe('post', '/records', adminCookie)
+        .send(recordInput)
+        .expect(201),
     );
     await unsafe(
       'post',
       '/records/' + aRecord.id + '/restore',
       adminCookie,
     ).expect(409);
-    await unsafe('delete', '/records/' + replacement.id, aCookie).expect(200);
+    await unsafe('delete', '/records/' + replacement.id, adminCookie).expect(
+      200,
+    );
     await unsafe(
       'post',
       '/records/' + aRecord.id + '/restore',
@@ -699,7 +646,7 @@ describe('V1 real PostgreSQL HTTP integration', () => {
     ).expect(201);
     await request(http)
       .get('/api/records/' + aRecord.id)
-      .set('Cookie', aCookie)
+      .set('Cookie', adminCookie)
       .expect(200);
   });
   it('preview is read-only and reports Arabic workbook duplicates', async () => {
@@ -798,7 +745,7 @@ describe('V1 real PostgreSQL HTTP integration', () => {
     await upload('preview', await workbook()).expect(201);
     // A repeated national ID no longer makes a row a duplicate: identity is
     // the person/spouse name pair, and this record's name matches no row.
-    await unsafe('post', '/records', aCookie)
+    await unsafe('post', '/records', adminCookie)
       .send({ ...recordInput, nationalId: '00077' })
       .expect(201);
     const sheet = await workbook(
@@ -853,15 +800,15 @@ describe('V1 real PostgreSQL HTTP integration', () => {
       notes: '',
     });
     // An existing household: husband and wife both named.
-    await unsafe('post', '/records', aCookie)
+    await unsafe('post', '/records', adminCookie)
       .send(pair('زوج اختبار', 'زوجة اختبار'))
       .expect(201);
     // Same husband, different wife: a different household, so it imports.
-    await unsafe('post', '/records', aCookie)
+    await unsafe('post', '/records', adminCookie)
       .send(pair('زوج اختبار', 'زوجة أخرى'))
       .expect(201);
     // Same wife, different husband: also a different household.
-    await unsafe('post', '/records', aCookie)
+    await unsafe('post', '/records', adminCookie)
       .send(pair('زوج آخر', 'زوجة اختبار'))
       .expect(201);
     const both = await db.censusRecord.count({
@@ -890,7 +837,7 @@ describe('V1 real PostgreSQL HTTP integration', () => {
     ).toMatchObject({ importedRows: 1, duplicateRows: 2 });
   });
   it('skips a row whose person and spouse names both match an existing record', async () => {
-    await unsafe('post', '/records', aCookie)
+    await unsafe('post', '/records', adminCookie)
       .send({
         ...recordInput,
         nationalId: null,
@@ -907,7 +854,7 @@ describe('V1 real PostgreSQL HTTP integration', () => {
     expect(
       body<{ importedRows: number; duplicateRows: number }>(confirmed),
     ).toMatchObject({ importedRows: 0, duplicateRows: 1 });
-    await unsafe('post', '/records', aCookie)
+    await unsafe('post', '/records', adminCookie)
       .send({
         ...recordInput,
         nationalId: null,
@@ -1003,68 +950,77 @@ describe('V1 real PostgreSQL HTTP integration', () => {
       .expect(200);
     expect(body<{ total: number }>(history).total).toBeGreaterThan(0);
   });
-  it('admin updates municipality and adds accounts without exposing hashes', async () => {
+  it('creates municipalities without users and persists unique, sorted areas for future statistics', async () => {
+    const initialUsers = await db.user.count();
+    const areaName = 'منطقة جديدة-' + run;
+    for (const suffix of ['one', 'two']) {
+      const result = await unsafe('post', '/admin/municipalities', adminCookie)
+        .send({
+          name: 'بلدية ' + suffix + '-' + run,
+          areaName: '  ' + areaName + '  ',
+        })
+        .expect(201);
+      municipalities.push(body<MunicipalityResponse>(result).id);
+      expect(result.body).not.toHaveProperty('users');
+      expect(result.body).not.toHaveProperty('passwordHash');
+    }
+    expect(await db.user.count()).toBe(initialUsers);
+    expect(await db.area.count({ where: { name: areaName } })).toBe(1);
     await unsafe('patch', '/admin/municipalities/' + aId, adminCookie)
-      .send({ areaName: 'منطقة اختبار معدلة' })
+      .send({ areaName: 'منطقة معدلة-' + run })
       .expect(200);
-    const created = await unsafe(
-      'post',
-      '/admin/municipalities/' + aId + '/users',
-      adminCookie,
-    )
-      .send({ username: 'extra-' + run, password })
-      .expect(201);
-    const user = body<{ id: string }>(created);
-    users.push(user.id);
-    expect(created.body).not.toHaveProperty('passwordHash');
-    const before = await db.municipality.count();
+    const areas = await request(http)
+      .get('/api/admin/areas')
+      .set('Cookie', adminCookie)
+      .expect(200);
+    const names = body<string[]>(areas);
+    expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b, 'ar')));
+    expect(names).toContain(areaName);
+    expect(names).toContain('منطقة اختبار-' + run);
+    expect(names).toContain('منطقة معدلة-' + run);
+    const search = await request(http)
+      .get('/api/admin/municipalities')
+      .query({ search: areaName })
+      .set('Cookie', adminCookie)
+      .expect(200);
+    expect(body<{ total: number }>(search).total).toBe(2);
     await unsafe('post', '/admin/municipalities', adminCookie)
-      .send({
-        name: 'بلدية متراجعة-' + run,
-        areaName: 'اختبار',
-        username: 'a-' + run,
-        password,
-      })
+      .send({ name: 'بلدية one-' + run, areaName: 'منطقة متراجعة-' + run })
       .expect(409);
-    expect(await db.municipality.count()).toBe(before);
+    expect(
+      await db.area.findUnique({ where: { name: 'منطقة متراجعة-' + run } }),
+    ).toBeNull();
+    await unsafe('post', '/admin/municipalities', adminCookie)
+      .send({ name: 'blank', areaName: '' })
+      .expect(400);
+    await unsafe('post', '/admin/municipalities', adminCookie)
+      .send({ name: 'credentials', areaName, username: 'unwanted', password })
+      .expect(400);
+    const list = await request(http)
+      .get('/api/admin/municipalities')
+      .set('Cookie', adminCookie)
+      .expect(200);
+    expect(JSON.stringify(list.body)).not.toContain('passwordHash');
+    expect(
+      body<{ items: Array<{ users?: unknown }> }>(list).items.every(
+        (item) => item.users === undefined,
+      ),
+    ).toBe(true);
   });
-  it('password reset revokes sessions; disabled users and municipalities cannot authenticate or use old sessions', async () => {
-    await unsafe('patch', '/admin/users/' + bUserId, adminCookie)
-      .send({ password })
-      .expect(200);
-    await request(http).get('/api/auth/me').set('Cookie', bCookie).expect(401);
-    bCookie = await login('b-' + run);
-    await unsafe('patch', '/admin/users/' + bUserId, adminCookie)
-      .send({ isActive: false })
-      .expect(200);
-    await request(http).get('/api/auth/me').set('Cookie', bCookie).expect(401);
-    await unsafe('post', '/auth/login')
-      .send({ username: 'b-' + run, password })
-      .expect(401);
-    await unsafe('patch', '/admin/users/' + bUserId, adminCookie)
-      .send({ isActive: true })
-      .expect(200);
-    await request(http).get('/api/auth/me').set('Cookie', bCookie).expect(401);
+  it('disabling municipalities preserves records and blocks new administrator entry until re-enabled', async () => {
     await unsafe('patch', '/admin/municipalities/' + bId, adminCookie)
       .send({ isActive: false })
       .expect(200);
-    await unsafe('post', '/auth/login')
-      .send({ username: 'b-' + run, password })
-      .expect(401);
+    await unsafe('post', '/records', adminCookie)
+      .send({ ...recordInput, nationalId: 'disabled', municipalityId: bId })
+      .expect(400);
+    await request(http)
+      .get('/api/records/' + bRecord.id)
+      .set('Cookie', adminCookie)
+      .expect(200);
     await unsafe('patch', '/admin/municipalities/' + bId, adminCookie)
       .send({ isActive: true })
       .expect(200);
-    const disabledHash = createHash('sha256')
-      .update(aCookie.split('=')[1])
-      .digest('hex');
-    await db.user.update({ where: { id: aUserId }, data: { isActive: false } });
-    await request(http).get('/api/auth/me').set('Cookie', aCookie).expect(401);
-    await db.user.update({ where: { id: aUserId }, data: { isActive: true } });
-    await db.session.update({
-      where: { tokenHash: disabledHash },
-      data: { expiresAt: new Date(0) },
-    });
-    await request(http).get('/api/auth/me').set('Cookie', aCookie).expect(401);
   });
   it('logout revokes the opaque session and clears its cookie', async () => {
     const res = await unsafe('post', '/auth/logout', adminCookie).expect(201);

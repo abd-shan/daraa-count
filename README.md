@@ -1,6 +1,6 @@
 # count-daraa
 
-An Arabic-first government census application for municipal committees in Daraa Governorate. V1 collects **شهداء الثورة**, **مصابو الحرب** and **الأشد فقراً**. It uses exactly two roles: `SUPER_ADMIN` and `MUNICIPALITY`.
+An Arabic-first government census application for Daraa Governorate. It collects **شهداء الثورة**, **مصابو الحرب** and **الأشد فقراً**. Only `SUPER_ADMIN` can log in. The historical `MUNICIPALITY` role and user rows are retained for record ownership and audit history; their login and sessions are rejected.
 
 ## Architecture and folders
 
@@ -117,6 +117,8 @@ Migration history includes:
 - `20261004173353_integrity_constraints`: municipality-account index and PostgreSQL checks for role/municipality mapping, positive family count, required person name and marital consistency.
 - `20261005120000_optional_family_count`: allows unknown family size as NULL; supplied counts must still be integers from 1 to 10000.
 - `20261005121000_add_marital_statuses`: adds WIDOWED and DIVORCED with optional spouse information, retaining existing marital constraints.
+- `20261008120000_persist_areas`: backfills a persistent area registry, adds the municipality-area foreign key and index.
+- `20261008121000_retire_municipality_accounts`: disables historical municipality users, revokes sessions and audits the change without removing ownership/history. Back up before applying these migrations; deploy the matching backend/frontend together.
 
 Prisma does not model these CHECK constraints in its schema DSL; they are maintained in SQL migration history. There is no global unique national-ID constraint. For future schema changes use the installed CLI from `backend`:
 
@@ -140,11 +142,11 @@ npm run dev --prefix frontend
 
 Open **http://localhost:5173**. Vite listens on loopback and proxies `/api` to NestJS at port 3000 while preserving the origin. NestJS development also binds to loopback. The default deployment does not enable CORS.
 
-Municipality workflow: log in → three category cards with current counts → category list → add/edit a record or export Excel. Search, marital-status filtering and pagination run on the server; Excel export uses the selected status too. Single status clears the spouse; married status requires a spouse. Poverty has no marital selector and an optional spouse. Historical status spellings ending in ه (عازبه، متزوجه، أرمله، مطلقه) are accepted in record input and Excel import; this normalization never changes people's names.
+Administrator workflow: log in → summary/category cards → select a municipality → add/edit records or export Excel. Search, marital-status filtering and pagination run on the server; Excel export uses the selected status too. Single status clears the spouse; married status requires a spouse. Poverty has no marital selector and an optional spouse. Historical status spellings ending in ه (عازبه، متزوجه، أرمله، مطلقه) are accepted in record input and Excel import; this normalization never changes people's names.
 
 Family member count is optional: blank, omitted or null values are stored as NULL and exported as an empty cell. A supplied count must be an integer from 1 to 10000. API saves and Excel imports accept `عازب`/`عازبة` as SINGLE, `متزوج`/`متزوجة` as MARRIED, `أرمل`/`أرملة` (also without hamza) as WIDOWED and `مطلق`/`مطلقة` as DIVORCED. Widow/divorced spouse information is optional; married still requires it and single clears it. Export labels show both gender forms and can be imported again.
 
-Admin workflow: summary → municipalities/accounts, all records, deleted-record restore, import preview/confirmation, import history and audit history. Disabling accounts/municipalities or resetting passwords revokes current sessions. Existing passwords are never displayed.
+Municipality creation requires only `name` and `areaName`. Account creation/activation/password endpoints have been removed. Enter a saved area from the sorted suggestions or type a new area; the last successfully saved area remains selected for the next municipality on the page. Areas are persisted independently in the `Area` table, with unique names and a foreign key from `Municipality.areaName`, ready for future grouping/statistics. Names are trimmed and repeated whitespace is collapsed. Editing a municipality's area keeps the previous area available in the registry. Search supports municipality name and area name.
 
 ## Navigation and unsent drafts
 
@@ -268,7 +270,7 @@ Export is available to both roles and always scope-enforced. It produces real `.
 
 ## API overview
 
-See [the complete frontend/API integration guide](docs/FRONTEND_API_INTEGRATION.md) for all 22 endpoints, request/response contracts, current React consumers, cache updates and integration checks to preserve during frontend redesign.
+See [the complete frontend/API integration guide](docs/FRONTEND_API_INTEGRATION.md) for all 21 endpoints, request/response contracts, current React consumers, cache updates and integration checks to preserve during frontend redesign.
 
 All paths have the `/api` prefix:
 
@@ -282,7 +284,7 @@ All paths have the `/api` prefix:
 | GET `/records/export/xlsx` | Authenticated, scoped; category required |
 | GET/POST `/admin/municipalities`, PATCH `/admin/municipalities/:id` | Super admin |
 | GET `/admin/municipalities/options` | Super admin, bounded selection list |
-| POST `/admin/municipalities/:id/users`, PATCH `/admin/users/:id` | Super admin |
+| GET `/admin/areas` | Super admin, persisted sorted area names |
 | POST `/admin/imports/preview`, POST `/admin/imports/confirm` | Super admin, multipart original file |
 | GET `/admin/imports`, GET `/admin/audit` | Super admin, paginated |
 
